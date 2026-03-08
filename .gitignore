@@ -1,0 +1,65 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / package artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / editor files
+.vscode/
+.idea/
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# Model checkpoints / weights
+checkpoints/
+checkpoints_*/
+weights/
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Inference / training outputs
+inference_output/
+runs/
+outputs/
+results/
+vis/
+
+# Dataset (keep only metadata in repo)
+data/
+dataset/
+datasets/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
