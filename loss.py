@@ -115,7 +115,6 @@ class SimOTAAssigner(nn.Module):
                     torch.zeros(num_anchors, device=device, dtype=torch.bool))
 
         # 1. Preliminary Filtering (in_box or in_center)
-        # 简单起见，使用中心点距离筛选 candidates
         # valid_mask: [num_gt, num_anchors]
         valid_mask, is_in_boxes_and_center = self.get_in_gt_and_in_center_info(
             anc_points, gt_bboxes)
@@ -128,28 +127,6 @@ class SimOTAAssigner(nn.Module):
         # Classification cost
         # gt_labels: [num_gt, 1] -> one_hot -> [num_gt, C]
         gt_cls = F.one_hot(gt_labels.long().squeeze(-1), num_classes).to(pd_scores.dtype)
-        # pd_scores: [num_anchors, C] -> [1, num_anchors, C]
-        # gt_cls: [num_gt, C] -> [num_gt, 1, C]
-        # cost: BCE/Focal
-        # Simplified: use score diff
-        # pairwise_cls_loss: [num_gt, num_anchors]
-        # Using binary_cross_entropy_with_logits if scores are logits, but here they are sigmoid
-        # Cost = CLS_Cost + IOU_Cost
-        # SimOTA: cost = cls_loss + 3.0 * iou_loss
-        
-        # Approximate cls cost: (1 - score)^gamma ? 
-        # Or simple cross entropy
-        # pd_scores.unsqueeze(0): [1, A, C]
-        # gt_cls.unsqueeze(1): [G, 1, C]
-        # We calculate cost only for candidates
-        
-        # Let's compute cost for all pairs (optimized later)
-        # Using score directly for simplicity: Cost = -pred_score * gt_score
-        # But we need specific class score.
-        
-        # Expand pd_scores to [G, A, C] is too big.
-        # Instead, gather class scores corresponding to GT
-        # pd_scores: [A, C]
         gt_cls_idx = gt_labels.long().squeeze(-1) # [G]
         # scores for the corresponding GT class: [G, A]
         pairwise_pred_scores = pd_scores[:, gt_cls_idx].T # [G, A]
@@ -171,11 +148,6 @@ class SimOTAAssigner(nn.Module):
         
         # 4. Assignment
         assigned_gt_inds = torch.full((num_anchors,), -1, device=pd_bboxes.device, dtype=torch.long)
-        
-        # Iterate over each GT to assign
-        # To avoid loop, we can't fully vectorise matching logic easily with "unique" constraint
-        # But SimOTA usually loops over GTs or uses a specific matrix trick.
-        # Given batch size is small, looping is fine or use this trick:
         
         matching_matrix = torch.zeros_like(cost_matrix)
         
@@ -272,41 +244,12 @@ class SimOTAAssigner(nn.Module):
         anc_cx = anchors_expanded[..., 0]
         anc_cy = anchors_expanded[..., 1]
         
-        # Calculate distance between all anchors and all GT centers
-        # dists: [G, A]
         dists = (gt_cx - anc_cx)**2 + (gt_cy - anc_cy)**2
-        
-        # Check which GTs have no valid anchor in is_in_gts
-        # valid_counts: [G]
         valid_counts = is_in_gts.sum(dim=1)
         
-        # For GTs with no candidates, pick top-k (e.g. 1) nearest anchors
-        # This is a simplified fallback
-        
-        # We can just union the nearest candidates with is_in_gts to be safe
-        # Find k nearest anchors for EACH GT
-        # We use k=3 to ensure enough candidates for small objects
-        # k = min(3, num_anchors)
-        # _, nearest_indices = torch.topk(dists, k, dim=1, largest=False)
-        # nearest_mask = torch.zeros_like(is_in_gts)
-        # nearest_mask.scatter_(1, nearest_indices, True)
-        # is_in_gts = is_in_gts | nearest_mask
-        
-        # Or more strict fallback: Only add if count == 0
         if (valid_counts == 0).any():
-             # Get indices of GTs that need help
              problematic_gt_mask = (valid_counts == 0) # [G]
-             
-             # For these GTs, find nearest anchor
-             # dists[problematic_gt_mask]: [N_prob, A]
              _, nearest_indices = torch.topk(dists[problematic_gt_mask], k=1, dim=1, largest=False)
-             
-             # Update is_in_gts
-             # We need to map back to [G, A]
-             # It's tricky with masking. Let's do a loop or advanced indexing.
-             # Easier: just update the mask for all GTs using nearest logic if valid_counts is 0
-             # But let's just add nearest 1 anchor for ALL GTs as a safe baseline.
-             # This ensures every GT has at least 1 candidate.
              _, nearest_indices = torch.topk(dists, k=1, dim=1, largest=False)
              nearest_mask = torch.zeros_like(is_in_gts)
              nearest_mask.scatter_(1, nearest_indices, True)
@@ -454,16 +397,6 @@ class DetectionLoss(nn.Module):
                 loss_box_sum += (1.0 - iou).sum()
                 
                 # 3. DFL Loss
-                # Need to find which scale/anchor index corresponds to pos samples
-                # Re-extract dist prediction
-                # It's hard to map back to flattened pred_dist without storing it.
-                # Let's assume we can't easily do DFL in this loop structure without re-gathering.
-                # Simplified: skip DFL for now or re-gather.
-                
-                # To implement DFL properly:
-                # We need the raw distribution output for the positive samples.
-                # Let's reconstruct it.
-                # Flatten raw preds again
                 raw_pred_list = []
                 for i, pred in enumerate(predictions):
                     B, H, W, C = pred.shape

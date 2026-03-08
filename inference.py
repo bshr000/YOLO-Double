@@ -1,6 +1,3 @@
-"""
-推理脚本 (Dual Branch)
-"""
 import os
 import cv2
 import torch
@@ -211,7 +208,6 @@ def inference(args):
 
                 label = f"{cls_id} {conf:.2f}"
 
-                # 在可见光图像上画框
                 plot_one_box(
                     box,
                     img_vis_raw,
@@ -220,7 +216,6 @@ def inference(args):
                     line_thickness=2
                 )
 
-                # 在红外图像上画框
                 plot_one_box(
                     box,
                     img_ir_raw,
@@ -230,7 +225,6 @@ def inference(args):
                 )
 
                 if args.save_txt:
-                    # 每次推理该图片前先清空旧结果，避免累计
                     if i == 0:
                         open(txt_path, 'w').close()
                     # Save YOLO normalized to ORIGINAL image (cx,cy,w,h,conf)

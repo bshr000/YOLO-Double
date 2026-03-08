@@ -1,6 +1,3 @@
-"""
-目标检测验证脚本 (mAP计算)
-"""
 import os
 import torch
 import numpy as np
@@ -174,7 +171,6 @@ def process_batch(detections, labels, iouv):
 def validate(model, dataloader, device, conf_thres=0.001, nms_thres=0.6, iou_thres=0.5, verbose=False):
     model.eval()
     
-    # 验证指标配置
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
     
@@ -188,24 +184,13 @@ def validate(model, dataloader, device, conf_thres=0.001, nms_thres=0.6, iou_thr
             images_ir = images_ir.to(device)
             
             # 1. Inference
-            # 使用混合精度
             with torch.amp.autocast('cuda', enabled=device.type == 'cuda'):
                 predictions = model(images_vis, images_ir)
-                # decode_predictions 返回 [B, N, 6] (cls, conf, cx, cy, w, h) (归一化)
-                # 注意: decode_predictions 内部已经做了 threshold 过滤 (但通常是比较高的阈值)
-                # 这里我们在 decode 时应该用较低阈值 (如0.001) 以计算 mAP
                 detections_list = model.decode_predictions(predictions, conf_threshold=conf_thres)
             
             # 2. Process Batch
             for i, det in enumerate(detections_list):
-                # det: [N, 6] (cls, conf, cx, cy, w, h)
-                
-                # 获取当前图像的 Targets
-                # target['boxes']: [M, 5] (cls, cx, cy, w, h)
                 target_boxes = targets[i]['boxes'].to(device)
-                
-                # 转换 Targets 为绝对坐标
-                # 假设 Dataset 返回归一化坐标, 需乘以图像尺寸
                 _, _, h, w = images_vis.shape
                 
                 tcls = target_boxes[:, 0]
@@ -215,28 +200,17 @@ def validate(model, dataloader, device, conf_thres=0.001, nms_thres=0.6, iou_thr
                 tbox[:, [0, 2]] *= w
                 tbox[:, [1, 3]] *= h
                 
-                # 如果没有预测框
                 if len(det) == 0:
                     if len(target_boxes):
                         stats.append((np.zeros((0, niou), dtype=bool), torch.Tensor(), torch.Tensor(), tcls.cpu().numpy()))
                     continue
                 
-                # NMS
-                # non_max_suppression 输入期望: [N, 6]
-                # 但这里的 det 已经是 [N, 6] (cls, conf, cx, cy, w, h)
-                # 转换 det 为绝对坐标
                 det_abs = det.clone()
                 det_abs[:, 2] *= w  # cx
                 det_abs[:, 3] *= h  # cy
                 det_abs[:, 4] *= w  # w
                 det_abs[:, 5] *= h  # h
                 
-                # 转换为 xyxy 供 NMS 使用 (utils.py 里的 NMS 期望输入格式可能需要调整)
-                # 查看 utils.py, non_max_suppression 接收 [class, conf, cx, cy, w, h]
-                # 并返回相同格式。
-                # 为了 IoU 计算方便，我们这里先把 xywh 转 xyxy
-                
-                # 执行 NMS
                 det_nms = non_max_suppression(det_abs, nms_threshold=nms_thres)
                 
                 if len(det_nms) == 0:
@@ -244,22 +218,13 @@ def validate(model, dataloader, device, conf_thres=0.001, nms_thres=0.6, iou_thr
                         stats.append((np.zeros((0, niou), dtype=bool), torch.Tensor(), torch.Tensor(), tcls.cpu().numpy()))
                     continue
                 
-                # 准备 mAP 计算数据
-                # det_nms: [M, 6] (cls, conf, cx, cy, w, h)
-                # 转为 xyxy
                 pred_xyxy = xywh2xyxy(det_nms[:, 2:6])
                 pred_conf = det_nms[:, 1]
                 pred_cls = det_nms[:, 0]
-                
-                # [x1, y1, x2, y2, conf, cls]
+
                 pred_cat = torch.cat((pred_xyxy, pred_conf.unsqueeze(1), pred_cls.unsqueeze(1)), 1)
                 
-                # tcat: [cls, x1, y1, x2, y2]
-                target_cat = torch.cat((tcls.unsqueeze(1), tbox), 1)
-                
-                # 计算 True Positive (Correct)
-                # pred_cat: [N, 6] (x1, y1, x2, y2, conf, cls)
-                # target_cat: [M, 5] (cls, x1, y1, x2, y2)
+                target_cat = torch.cat((tcls.unsqueeze(1), tbox), 1) 
                 
                 correct = process_batch(pred_cat.cpu().numpy(), target_cat.cpu().numpy(), iouv.cpu())
                 
@@ -309,15 +274,12 @@ def validate(model, dataloader, device, conf_thres=0.001, nms_thres=0.6, iou_thr
 
 
 def main(args):
-    # 设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    
-    # 加载配置
+
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
-        
-    # 加载数据
+
     val_dataset = DualYOLODataset(
         image_dir=config['data']['val_images'],
         label_dir=config['data']['val_labels'],
@@ -332,32 +294,26 @@ def main(args):
         collate_fn=collate_fn_dual,
         pin_memory=True
     )
-    
-    # 加载模型
-    # model = build_model(config).to(device)
+
     model = DualModalDetector(num_classes=config['data']['num_classes'])
     model = model.to(device)
-    
-    # 加载权重
+
     print(f"Loading checkpoint: {args.checkpoint}")
     ckpt = load_checkpoint(args.checkpoint)
-    
-    # 优先加载 EMA
+
     if 'ema_state_dict' in ckpt:
         print("Using EMA weights...")
         state_dict = ckpt['ema_state_dict']
     else:
         print("Using standard weights...")
         state_dict = ckpt['model_state_dict']
-    
-    # 清理不必要的键 (如 thop 产生的)
+
     unwanted = [k for k in state_dict.keys() if 'total_ops' in k or 'total_params' in k]
     for k in unwanted:
         del state_dict[k]
         
     model.load_state_dict(state_dict)
     
-    # 运行验证
     validate(
         model, 
         val_loader, 

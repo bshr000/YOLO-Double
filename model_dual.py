@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# =================================================================
-# 1. 基础组件 (来自 csp_backbone.py)
-# =================================================================
 
 def autopad(k, p=None, d=1):
     if d > 1:
@@ -62,7 +59,6 @@ class SPPF(nn.Module):
         return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))
 
 class CSPDarknet(nn.Module):
-    """CSPDarknet 骨干网络"""
     def __init__(self, depth_multiple=0.33, width_multiple=0.5):
         super().__init__()
         d, w = depth_multiple, width_multiple
@@ -84,12 +80,8 @@ class CSPDarknet(nn.Module):
         c5 = self.layer4(c4)
         return [c3, c4, c5]
 
-# =================================================================
-# 2. 颈部与头部 (来自 model.py)
-# =================================================================
 
 class PANFPN(nn.Module):
-    """PAN-FPN 结构"""
     def __init__(self, in_channels_list, out_channels=256):
         super(PANFPN, self).__init__()
         self.lateral_layers = nn.ModuleList([nn.Conv2d(in_channels, out_channels, 1) for in_channels in in_channels_list])
@@ -110,7 +102,6 @@ class PANFPN(nn.Module):
         return pan_feats
 
 class DetectionHead(nn.Module):
-    """解耦检测头"""
     def __init__(self, in_channels, num_anchors, num_classes, reg_max=16):
         super(DetectionHead, self).__init__()
         self.num_classes = num_classes
@@ -125,20 +116,16 @@ class DetectionHead(nn.Module):
         output = torch.cat([self.reg_pred(self.reg_convs(x)), self.cls_pred(self.cls_convs(x))], dim=1)
         return output.permute(0, 2, 3, 1).contiguous()
 
-# =================================================================
-# 3. 双分支整合模型 (核心修改)
-# =================================================================
 
 class DualModalDetector(nn.Module):
     def __init__(self, num_classes, backbone_config='cspdarknet_s'):
         super().__init__()
         self.num_classes = num_classes
-        # 实例化两个相同的分支
         self.backbone_vis = CSPDarknet(0.33, 0.50)
         self.backbone_ir = CSPDarknet(0.33, 0.50)
         
         in_channels = self.backbone_vis.out_channels
-        # 融合前的特征对齐层
+
         self.align_vis = nn.ModuleList([nn.Conv2d(c, c, 1) for c in in_channels])
         self.align_ir = nn.ModuleList([nn.Conv2d(c, c, 1) for c in in_channels])
         
@@ -149,8 +136,6 @@ class DualModalDetector(nn.Module):
         self._init_cls_bias()
 
     def _init_cls_bias(self):
-        # Initialize classification head bias to -log((1-p)/p) where p is small
-        # This prevents instability at the beginning of training
         import math
         prior_prob = 1e-2
         bias_value = -math.log((1 - prior_prob) / prior_prob)
@@ -162,23 +147,18 @@ class DualModalDetector(nn.Module):
         """
         输入: x_vis (B,3,640,640), x_ir (B,3,640,640)
         """
-        # 1. 在模型内部进行拼接
         x_concat = torch.cat([x_vis, x_ir], dim=1)  # (B, 6, 640, 640)
         
-        # 2. 进行切片
         v_input = x_concat[:, :3, :, :]
         r_input = x_concat[:, 3:6, :, :]
         
-        # 3. 分别通过骨干网络
         feat_v = self.backbone_vis(v_input)
         feat_r = self.backbone_ir(r_input)
         
-        # 4. 在 P3, P4, P5 进行 Add 融合
         fused = []
         for i in range(len(feat_v)):
             fused.append(self.align_vis[i](feat_v[i]) + self.align_ir[i](feat_r[i]))
             
-        # 5. 颈部与检测头
         fpn_outputs = self.fpn(fused)
         return [head(f) for head, f in zip(self.heads, fpn_outputs)]
 
@@ -200,7 +180,6 @@ class DualModalDetector(nn.Module):
             B, H, W, _ = pred.shape
             stride = feature_strides[level] if level < len(feature_strides) else feature_strides[-1]
 
-            # 输入尺寸（letterbox 后）可由特征图尺寸 * stride 推出
             in_h = H * stride
             in_w = W * stride
 
@@ -275,9 +254,8 @@ class DualModalDetector(nn.Module):
 
 if __name__ == "__main__":
     model = DualModalDetector(num_classes=8)
-    # print(model) # 打印网络结构
+    # print(model) 
     
-    # 模拟数据
     v = torch.randn(2, 3, 640, 640)
     r = torch.randn(2, 3, 640, 640)
     

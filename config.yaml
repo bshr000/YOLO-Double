@@ -8,16 +8,16 @@ augmentation:
   scale: 0.5
   translate: 0.1
 data:
-  class_names: [] # 可选：类别名称列表
+  class_names: [] # 可选
   num_classes: 8
   train_images: /mnt/data/zxy/dataset/vedai_8/train.txt
   train_labels: /mnt/data/zxy/dataset/vedai_8/labels/visible
   val_images: /mnt/data/zxy/dataset/vedai_8/test.txt
   val_labels: /mnt/data/zxy/dataset/vedai_8/labels/visible
 eval:
-  conf_threshold: 0.25   # 置信度阈值（越低检测越多）
-  iou_threshold: 0.5    # mAP计算的IoU阈值
-  nms_threshold: 0.45    # NMS IoU阈值（越低重复越少）
+  conf_threshold: 0.25   
+  iou_threshold: 0.5   
+  nms_threshold: 0.45    
 loss:
   lambda_box: 7.5
   lambda_cls: 0.5
@@ -27,7 +27,7 @@ model:
   input_size:
   - 640
   - 640
-  num_anchors: 1    # Anchor-Free模式下设为1 (每个网格预测一个框)
+  num_anchors: 1    
 optimizer:
   lr_schedule: cosine
   type: SGD
@@ -39,7 +39,7 @@ train:
   momentum: 0.937
   num_workers: 4
   resume: ''
-  save_interval: 10   # 保存间隔（以epoch为单位）
+  save_interval: 10   
   warmup_epochs: 3
   weight_decay: 0.0005
 
